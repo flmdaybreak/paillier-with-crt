@@ -15,12 +15,12 @@ using namespace std;
 struct PubKey
 {
     mpz_t n;
-    mpz_t nSquared;
     mpz_t g;
+    mpz_t nSquared;
 };
 
 #define SK_L_SIZE 6
-#define SK_H_SIZE 5
+#define SK_H_SIZE 6
 struct PrivKey
 {   
     //n_length / 2
@@ -32,6 +32,7 @@ struct PrivKey
     mpz_t hq;
     
     //nlength
+    mpz_t n;
     mpz_t pSquared;
     mpz_t qSquared;
     mpz_t qTimesQInvModP;
@@ -42,8 +43,8 @@ struct PrivKey
 void initPubKey(struct PubKey *pubKey)
 {
     mpz_init(pubKey->n);
-    mpz_init(pubKey->nSquared);
     mpz_init(pubKey->g);
+    mpz_init(pubKey->nSquared);
 }
 
 void freePubKey(struct PubKey *pubKey)
@@ -61,6 +62,8 @@ void initPrivKey(struct PrivKey *privKey)
     mpz_init(privKey->qMinusOne);
     mpz_init(privKey->hp);
     mpz_init(privKey->hq);
+
+    mpz_init(privKey->n);
     mpz_init(privKey->pSquared);
     mpz_init(privKey->qSquared);
     mpz_init(privKey->qTimesQInvModP);
@@ -74,10 +77,12 @@ void freePrivKey(struct PrivKey *privKey)
     mpz_clear(privKey->q);
     mpz_clear(privKey->pMinusOne);// useful or useless 
     mpz_clear(privKey->qMinusOne);// useful or useless 
-    mpz_clear(privKey->pSquared);
-    mpz_clear(privKey->qSquared);
     mpz_clear(privKey->hp);
     mpz_clear(privKey->hq);
+
+    mpz_clear(privKey->n);    
+    mpz_clear(privKey->pSquared);
+    mpz_clear(privKey->qSquared);
     mpz_clear(privKey->qTimesQInvModP);
     mpz_clear(privKey->pTimesPInvModQ);
     mpz_clear(privKey->posNegBoundary);// useful or useless 
@@ -163,6 +168,7 @@ void generateKeys(struct PubKey *pubKey, struct PrivKey *privKey,  unsigned long
     mpz_mul(pubKey->nSquared, pubKey->n, pubKey->n);
 
     mpz_add_ui(pubKey->g, pubKey->n, 1);
+    mpz_set(privKey->n, pubKey->n);
 
     mpz_sub_ui(privKey->pMinusOne, privKey->p, 1);
     mpz_sub_ui(privKey->qMinusOne, privKey->q, 1);
@@ -189,11 +195,6 @@ void generateKeys(struct PubKey *pubKey, struct PrivKey *privKey,  unsigned long
     mpz_tdiv_q_ui(privKey->posNegBoundary, pubKey->n, 2);
 
     mpz_clear(tmp);
-
-    // printf("n: ");
-    // print(pubKey->n);
-    // printf("Positive / negative boundary: ");
-    // print(privKey->posNegBoundary);
 }
 
 void encrypt_ul(mpz_t output, long input, struct PubKey *pubKey)
@@ -213,73 +214,12 @@ void encrypt_ul(mpz_t output, long input, struct PubKey *pubKey)
     mpz_mul(output, pubKey->n, tmp);
     mpz_add_ui(output, output, 1);
 
-    //mpz_mod(output, output, pubKey->nSquared);//the first step of decryption is % n^2 anyway...
+    mpz_mod(output, output, pubKey->nSquared);//the first step of decryption is % n^2 anyway...
 
     mpz_clear(tmp);
 }
 
-void decrypt1(mpz_t output, mpz_t input, struct PubKey *pubKey, struct PrivKey *privKey)
-{
-    mpz_t mp, mq, tmp, tmp2;
-    mpz_init(mp);
-    mpz_init(mq);
-    mpz_init(tmp);
-    mpz_init(tmp2);
-
-    // c ^ (p-1) % p^2
-
-    // mp = L(c ^ (p-1) % p^2) * hp % p
-    mpz_powm(tmp, input, privKey->pMinusOne, privKey->pSquared);
-    // L(c ^ (p-1) % p^2)
-    L(tmp, tmp, privKey->p);
-    // L(c ^ (p-1) % p^2) * hp
-    mpz_mul(tmp, tmp, privKey->hp);
-    // mp = L(c ^ (p-1) % p^2) * hp % p
-    mpz_mod(mp, tmp, privKey->p);
-
-    mpz_powm(tmp, input, privKey->qMinusOne, privKey->qSquared);
-    L(tmp, tmp, privKey->q);
-
-     // tmp = L(c ^ (q-1) % q^2) * hq
-    mpz_mul(tmp, tmp, privKey->hq);
-    // mp = L(c ^ (q-1) % q^2) * hq % q
-    mpz_mod(mq, tmp, privKey->q);
-    
-    // u = mul_mod((mq - mp), self.p_inverse, self.q)
-    // mp + (u * self.p)
-    // tmp = mp * q^(-1)modp + mp * q^(-1)modp
-    mpz_t sub_tmp, tmp123;
-    mpz_init(sub_tmp);
-    mpz_init(tmp123);
-    if (mpz_cmp(mq, mp) > 0)
-    {
-        mpz_sub(sub_tmp, mq, mp);
-        mpz_mul(tmp123, sub_tmp, privKey->pTimesPInvModQ);
-        mpz_mod(tmp123, tmp123, privKey->q);
-        mpz_add(tmp, tmp123, mp);
-        
-    }else{
-        mpz_sub(sub_tmp, mp, mq);
-        mpz_mul(tmp123, sub_tmp, privKey->qTimesQInvModP);
-        mpz_mod(tmp123, tmp123, privKey->p);
-        mpz_add(tmp, tmp123, mq);
-    }
-
-    mpz_mod(output, tmp, pubKey->n);
-
-    if (mpz_cmp(output, privKey->posNegBoundary) > 0)
-    {
-        mpz_sub(output, output, pubKey->n);
-    }
-
-    mpz_clear(mp);
-    mpz_clear(mq);
-    mpz_clear(tmp);
-    mpz_clear(tmp2);
-}
-
-
-void decrypt2(mpz_t output, mpz_t input, struct PubKey *pubKey, struct PrivKey *privKey)
+void decrypt(mpz_t output, mpz_t input, struct PrivKey *privKey)
 {
     mpz_t mp, mq, tmp, tmp2;
     mpz_init(mp);
@@ -313,11 +253,11 @@ void decrypt2(mpz_t output, mpz_t input, struct PubKey *pubKey, struct PrivKey *
 
     mpz_add(tmp, tmp, tmp2);
 
-    mpz_mod(output, tmp, pubKey->n);
+    mpz_mod(output, tmp, privKey->n);
 
     if (mpz_cmp(output, privKey->posNegBoundary) > 0)
     {
-        mpz_sub(output, output, pubKey->n);
+        mpz_sub(output, output, privKey->n);
     }
 
     mpz_clear(mp);
@@ -334,6 +274,7 @@ void paillier_sub(mpz_t a, mpz_t b, mpz_t *result, struct PubKey *pubKey){
     mpz_init(*result);
     mpz_invert(tmp, b, pubKey->nSquared);
     mpz_mul(*result, a, tmp);
+    mpz_mod(*result,*result,pubKey->nSquared);
     // return encSub;
 }
 
@@ -344,130 +285,112 @@ void paillier_add(mpz_t a, mpz_t b, mpz_t *result, struct PubKey *pubKey){
     mpz_init(tmp);
     mpz_init(*result);
     mpz_mul(*result, a, b);
+    mpz_mod(*result,*result,pubKey->nSquared);
     // return encAdd;
 }
 
 void paillier_mul(mpz_t a, long b, mpz_t *result, struct PubKey *pubKey){
     
     mpz_t tmp;
+    mpz_t z;
     // mpz_t encAdd;
     mpz_init(tmp);
+    mpz_init(z);
+    mpz_set_si(z, b);
     mpz_init(*result);
-    mpz_mul(*result, a, b);
+    mpz_powm(*result, a, z, pubKey->nSquared);
     // return encAdd;
 }
 
-void testHomomorphicSubtraction(long lhs, long rhs, struct PubKey *pubKey, struct PrivKey *privKey)
-{
-    //encryptions
-    mpz_t encLhs, encRhs;
-    mpz_init(encLhs);
-    mpz_init(encRhs);
-
-    //descryptions
-    mpz_t decLhs, decRhs;
-    mpz_init(decLhs);
-    mpz_init(decRhs);
-
-    //homomorphic operation result
-    mpz_t encSub, decSub;
-    mpz_init(encSub);
-    mpz_init(decSub);
-
-    mpz_t tmp;
-    mpz_init(tmp);
-
-    //encrypt
-    encrypt_ul(encLhs, lhs, pubKey);
-    encrypt_ul(encRhs, rhs, pubKey);
-
-
-    //decrypt
-    clock_t start = clock();
-    // 在此处放置要测试的代码
-    for(int i = 0; i < 1; ++i){
-        decrypt2(decLhs, encLhs, pubKey, privKey);
-    }
-
-    clock_t end = clock();
-    double duration = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("decrypt1 use time is %f \n",duration);
-    
-    clock_t start1 = clock();
-    for(int i = 0; i < 1; ++i){
-        decrypt2(decRhs, encRhs, pubKey, privKey);
-    }
-    clock_t end1 = clock();
-    double duration1 = (double)(end1 - start1) / CLOCKS_PER_SEC;
-    printf("decrypt2 use time is %f \n",duration1);
-
-    printf("Decrypted lhs: ");
-    print(decLhs);
-    printf("Decrypted rhs: ");
-    print(decRhs);
-
-    //homomorphic subtraction
-    mpz_invert(tmp, encRhs, pubKey->nSquared);
-    mpz_mul(encSub, encLhs, tmp);
-    //mpz_mod(sub, sub, nSquared);//the first step of decryption is % n^2 anyway...
-
-    decrypt2(decSub, encSub, pubKey, privKey);
-
-    printf("Decrypted subtraction: ");
-    print(decSub);
-
-    mpz_clear(encLhs);
-    mpz_clear(encRhs);
-    mpz_clear(decLhs);
-    mpz_clear(decRhs);
-    mpz_clear(encSub);
-    mpz_clear(decSub);
-
-    mpz_clear(tmp);
-}
-
-string serialize_SK(struct PrivKey &sk){
+string serialize_sk(struct PrivKey &sk){
 
     mpz_t* sk_mpz[] = {&sk.p, &sk.q, &sk.pMinusOne, &sk.qMinusOne, 
-                        &sk.hp, &sk.hq, &sk.qTimesQInvModP, 
-                        &sk.pSquared, &sk.qSquared,
+                        &sk.hp, &sk.hq, &sk.n,
+                        &sk.pSquared, &sk.qSquared,&sk.qTimesQInvModP,
                         &sk.pTimesPInvModQ, &sk.posNegBoundary};
-    const int num_elems = sizeof(sk_mpz) / sizeof(sk_mpz[0]);
-    
+
+    const int elem_nums = sizeof(sk_mpz) / sizeof(sk_mpz[0]);
     int sk_body_byte_size = 0;
-    std::vector<int>sk_each_elem_byte_size(num_elems);
-    for (int i = 0; i < num_elems; ++i) {
+    std::vector<int>sk_each_elem_byte_size(elem_nums);
+
+    for (int i = 0; i < elem_nums; ++i) {
         mpz_t& sk_each_elem = *sk_mpz[i];
         sk_each_elem_byte_size[i] = mpz_size(sk_each_elem)*8;
         sk_body_byte_size += sk_each_elem_byte_size[i];
-        // printf("elem in %d has byte size is %d \n",i,sk_each_elem_byte_size[i]);
     }
-    printf("sk_body_byte_size is %d \n",sk_body_byte_size);
+
     char* sk_body_buf = (char*)malloc(sizeof(int)+sk_body_byte_size*sizeof(char));
     int half_n_length = sk_each_elem_byte_size[0];
     std::memcpy(sk_body_buf, reinterpret_cast<char*>(&half_n_length), sizeof(int));
 
     char* buf = sk_body_buf + sizeof(int);
-    for (int i = 0; i < num_elems; ++i) {
+    for (int i = 0; i < elem_nums; ++i) {
         mpz_export(buf, NULL, 1, 1, 0, 0, *sk_mpz[i]);
         buf += sk_each_elem_byte_size[i];
     }
     
-    printf("half_n_length = %d \n",half_n_length);
     return string(sk_body_buf,sizeof(int)+sk_body_byte_size*sizeof(char));
 }
 
-struct PrivKey dserialize_SK(string& sk_str){
+string serialize_pk(struct PubKey &pk)
+{
+
+    mpz_t* pk_mpz[] = {&pk.n, &pk.g, &pk.nSquared};
+    const int elem_nums = sizeof(pk_mpz) / sizeof(pk_mpz[0]);
+    
+    int pk_body_byte_size = 0;
+    std::vector<int>pk_each_elem_byte_size(elem_nums);
+    for (int i = 0; i < elem_nums; ++i) {
+        mpz_t& pk_each_elem = *pk_mpz[i];
+        pk_each_elem_byte_size[i] = mpz_size(pk_each_elem) * 8;
+        pk_body_byte_size += pk_each_elem_byte_size[i];
+
+    }
+
+    char* pk_body_buf = (char*)malloc(sizeof(int)+pk_body_byte_size*sizeof(char));
+    int n_length = pk_each_elem_byte_size[0];
+    std::memcpy(pk_body_buf, reinterpret_cast<char*>(&n_length), sizeof(int));
+
+    char* buf = pk_body_buf + sizeof(int);
+    for (int i = 0; i < elem_nums; ++i) {
+        mpz_export(buf, NULL, 1, 1, 0, 0, *pk_mpz[i]);
+        buf += pk_each_elem_byte_size[i];
+    }
+
+    return string(pk_body_buf,sizeof(int)+pk_body_byte_size*sizeof(char)); 
+}
+
+struct PubKey dserialize_pk(const string& pk_str)
+{
+    // std::string dd;
+
+    int pk_header_int;
+    std::memcpy(&pk_header_int, pk_str.data(), sizeof(int));
+
+    const char* pk_body_buf =  pk_str.c_str()+sizeof(int);
+    struct PubKey pubKey;
+    mpz_init(pubKey.n);
+    mpz_init(pubKey.nSquared);
+    mpz_init(pubKey.g);
+    
+    mpz_import(pubKey.g, pk_header_int, 1, sizeof(char), 0, 0, pk_body_buf);
+    mpz_import(pubKey.n, pk_header_int, 1, sizeof(char), 0, 0, pk_body_buf+pk_header_int);
+    mpz_import(pubKey.nSquared, 2*pk_header_int, 1, sizeof(char), 0, 0, pk_body_buf+2*pk_header_int);
+    return pubKey;
+
+}
+
+struct PrivKey dserialize_sk(string& sk_str){
+    
     int sk_half_n_length;
     std::memcpy(&sk_half_n_length, sk_str.data(), sizeof(int));
 
-    printf("read sk_half_n_length = %d \n",sk_half_n_length);
     struct PrivKey sk;
     initPrivKey(&sk);
 
     mpz_t* sk_mpz[] = {&sk.p, &sk.q, &sk.pMinusOne, &sk.qMinusOne, 
-                        &sk.hp, &sk.hq, &sk.qTimesQInvModP, 
-                        &sk.pSquared, &sk.qSquared,
+                        &sk.hp, &sk.hq, &sk.n,
+                        &sk.pSquared, &sk.qSquared,&sk.qTimesQInvModP,
                         &sk.pTimesPInvModQ, &sk.posNegBoundary};
     const int num_elems = sizeof(sk_mpz) / sizeof(sk_mpz[0]);
     char* sk_head = &sk_str[0];
@@ -483,81 +406,14 @@ struct PrivKey dserialize_SK(string& sk_str){
     return sk;
 }
 
-string serialize_PK(const struct PubKey &pk, struct PubKey *pk1)
-{
-    // std::string dd;
-
-    int n_length = mpz_size(pk.n)*8;
-    printf("n_length = %d \n",n_length);
-    char n_length_bytes[sizeof(int)];
-    std::memcpy(n_length_bytes, reinterpret_cast<char*>(&n_length), sizeof(int));
-
-    std::string n_header_str(n_length_bytes, sizeof(int));
-    // serialized_str.append(data_str);
-
-    size_t pk_size = mpz_size(pk.g); 
-    pk_size += mpz_size(pk.n); 
-    pk_size += mpz_size(pk.nSquared); 
-
-    char *buf = (char *) malloc(pk_size*8 * sizeof(char));
-
-    mpz_export(buf, NULL, 1, 1, 0, 0, pk.g);
-    // buf+=256;
-    mpz_export(buf+n_length, NULL, 1, 1, 0, 0, pk.n);
-    // buf+=256;
-    mpz_export(buf+2*n_length, NULL, 1, 1, 0, 0, pk.nSquared);
-       
-    mpz_import(pk1->g, n_length, 1, sizeof(char), 0, 0, buf);
-    mpz_import(pk1->n, n_length, 1, sizeof(char), 0, 0, buf+n_length);
-    mpz_import(pk1->nSquared, 2*n_length, 1, sizeof(char), 0, 0, buf+2*n_length);
-    // return pubKey;
-    std::string pk_body_str(buf, pk_size*8);
-
-    return  n_header_str.append(pk_body_str);
-}
-
-struct PubKey dserialize_PK(const string& pk_str)
-{
-    // std::string dd;
-
-    int pk_header_int;
-    std::memcpy(&pk_header_int, pk_str.data(), sizeof(int));
-    // pk_header_int = *reinterpret_cast<int*>(&pk_header_int);
-    printf("read pk header = %d \n",pk_header_int);
-    const char* pk_body_buf =  pk_str.c_str()+sizeof(int);
-    struct PubKey pubKey;
-    mpz_init(pubKey.n);
-    mpz_init(pubKey.nSquared);
-    mpz_init(pubKey.g);
-    
-    mpz_import(pubKey.g, pk_header_int, 1, sizeof(char), 0, 0, pk_body_buf);
-    mpz_import(pubKey.n, pk_header_int, 1, sizeof(char), 0, 0, pk_body_buf+pk_header_int);
-    mpz_import(pubKey.nSquared, 2*pk_header_int, 1, sizeof(char), 0, 0, pk_body_buf+2*pk_header_int);
-    return pubKey;
-
-}
-
-void dserialized_PK(const string& pk_str, struct PubKey *pubKey)
-{
-    // std::string dd;
-    const char* buf =  pk_str.c_str();
-    mpz_init(pubKey->n);
-    mpz_init(pubKey->nSquared);
-    mpz_init(pubKey->g);
-    
-    mpz_import(pubKey->g, 256, 1, sizeof(char), 0, 0, buf);
-    mpz_import(pubKey->n, 256, 1, sizeof(char), 0, 0, buf+256);
-    mpz_import(pubKey->nSquared, 512, 1, sizeof(char), 0, 0, buf+512);
-    // return pubKey;
-
-}
 long gen_random(){
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<long> dist(-100000000, 100000000); // specify range here
+    std::uniform_int_distribution<long> dist(-pow(2,20)-1, pow(2,20)); // specify range here
     // long r_value  = dist(gen);
     return dist(gen);
 }
+
 int main(int argc, char *argv[])
 {
     randomSeed = getRandomSeed();
@@ -572,16 +428,16 @@ int main(int argc, char *argv[])
 
     struct PubKey pubKey1;
     initPubKey(&pubKey1);
-    string pk_str = serialize_PK(pubKey,&pubKey1);
-    string sk_str = serialize_SK(privKey);
+    string pk_str = serialize_pk(pubKey);
+    string sk_str = serialize_sk(privKey);
 
-    struct  PrivKey skey = dserialize_SK(sk_str);
-    struct PubKey pkey = dserialize_PK(pk_str);
+    struct  PrivKey skey = dserialize_sk(sk_str);
+    struct PubKey pkey = dserialize_pk(pk_str);
     
-    // dserialized_PK(pk_str,&pkey);
     long lhs;
     long rhs;
-    if(argc > 2){
+
+    if(argc == 3){
         lhs = strtol(argv[1], NULL, 10);
         rhs = strtol(argv[2], NULL, 10);
     }else{
@@ -589,28 +445,43 @@ int main(int argc, char *argv[])
         rhs = gen_random();
     }
 
-
-    printf("Testing: %ld - %ld\n", lhs, rhs);
-    printf("result: %ld \n", lhs-rhs);
-    // testHomomorphicSubtraction(lhs, rhs, &pkey, &skey);
-    mpz_t encLhs, encRhs, res, plain_res;
+    mpz_t encLhs, encRhs, mul_res, add_res, mul_plain_res, add_plain_res;
     mpz_init(encLhs);
     mpz_init(encRhs);
-    // mpz_init(res);
-    mpz_init(plain_res);
+    mpz_init(mul_plain_res);
+    mpz_init(add_plain_res);
+
     encrypt_ul(encLhs, lhs, &pubKey);
     encrypt_ul(encRhs, rhs, &pubKey);
-    paillier_add(encLhs, encRhs, &res, &pubKey);
 
-    decrypt2(plain_res, res, &pubKey, &privKey);
-    mpz_t a;
-    long b = lhs+rhs;
-    mpz_init_set_si(a, b);
-    int cmp = mpz_cmp(a, plain_res);
-    assert(cmp == 0);
-    printf("benchmarch = %ld \n",cmp);
-    printf("add result: %ld \n", lhs+rhs);
-    print(plain_res);
+    paillier_mul(encLhs, rhs, &mul_res, &pubKey);
+    paillier_add(encLhs, encRhs, &add_res, &pubKey);
+
+    decrypt(mul_plain_res, mul_res, &privKey);
+    decrypt(add_plain_res, add_res, &privKey);
+
+    mpz_t mpz_mul_bench;
+    long mul_bench = lhs * rhs;
+    mpz_init_set_si(mpz_mul_bench, mul_bench);
+    int mul_cmp = mpz_cmp(mpz_mul_bench, mul_plain_res);
+
+    mpz_t mpz_add_bench;
+    long add_bench = lhs + rhs;
+    mpz_init_set_si(mpz_add_bench, add_bench);
+    int add_cmp = mpz_cmp(mpz_add_bench, add_plain_res);
+
+    assert(mul_cmp == 0 && add_cmp==0);
+    printf("paillier mul and add get right result \n");
+
+    printf("Testing input: %ld , %ld\n", lhs, rhs);
+    // printf("benchmarch = %ld \n",cmp);
+    printf("mul bench: %ld \n", mul_bench );
+    printf("mul res:  ");
+    print(mul_plain_res);
+
+    printf("add bench: %ld \n", add_bench );
+    printf("add res:  ");
+    print(add_plain_res);
 
     freePubKey(&pubKey);
     freePrivKey(&privKey);
